@@ -1,54 +1,17 @@
 const discord = require('discord.js');
-
+const {skipSpaces} = require('./utils');
+const EVENTS = require('./events');
+const config = require('./config');
 
 class CommandException extends Error {};
-class QuietCommandException extends Error {}
 
 
-class ValidArgument {
-	static isValid(val, message) {
-		return true;
-	}
-
-	static errorMessage(str) {
-		return `Invalid argument, expected ${this.expected} but got ${str}`
-	}
-}
-
-class WordArgument extends ValidArgument {
-	static regex = /\w+/y
-	static expected = 'a word';
-}
-
-class NumberArgument extends ValidArgument {
-	static regex = /\d+/y
-	static expected = 'a number';
-}
-
-class ChannelArgument extends WordArgument {
-	static isValid(val, message) {
-		return message.guild.channels.has(val) || message.guild.channels.find(c => c.name == val || (val.startsWith("<#") && val.endsWith(">") && c.name == val.substring(2, val.length - 1))) !== null;
-	}
-	static expected = 'a channel';
-}
-
-class UserArgument extends WordArgument {
-	static isValid(val, message) {
-		return message.guild.users.has(val) || message.guild.users.find(u => u.name == val || (val.startsWith("<@") && val.endsWith(">") && u.name == val.substring(2, val.length - 1))) !== null;
-	}
-	static expected = 'a user';
-}
-
-class TestArgument extends ValidArgument {
-	static regex = /(\w+) (\w+)/y
-}
-
-const EVENTS = {
-	COMMANDS: {
-		BOT_NOT_ALLOWED: 'BotDenied',
-		INVALID_TYPE: 'TypeDenied',
-		MISSING_PERMISSION: 'MissingPermission'
-	}
+const eventHandlers = {
+	[EVENTS.COMMANDS.BOT_NOT_ALLOWED]: (command) => {},
+	[EVENTS.COMMANDS.INVALID_TYPE]: (command) => {throw new CommandException(`This command is not allowed on ${command.message.type}`)},
+	[EVENTS.COMMANDS.MISSING_PERMISSION]: (command, permission) => {},
+	[EVENTS.COMMANDS.INVALID_ARGUMENT]: (command, message) => {throw  new CommandException(message)},
+	[EVENTS.COMMANDS.MISSING_ARGUMENTS]: (command) => {throw new CommandException(`This command requires at least ${command.minArgs} arguments`)}
 }
 
 class Command {
@@ -56,37 +19,33 @@ class Command {
 	clientPermissions = ["SEND_MESSAGES"];
 	userPermissions = [];
 	accept = ["guild"];
-	ownerBypass = true;
+	devBypass = true;
 	ignoreBots = true;
 	triggers = [];
 	args = [];
-
-	eventHandlers = {
-		[EVENTS.COMMANDS.BOT_NOT_ALLOWED]: (command) => command.handleException(new CommandException('A bot can\'t trigger command')),
-		[EVENTS.COMMANDS.INVALID_TYPE]: (command) => command.handleException(new CommandException(`This command is not allowed on ${command.message.type}`)),
-		[EVENTS.COMMANDS.MISSING_PERMISSION]: (command, permission) => command.handleException(new CommandException(`User ${command.message.author.name} is missing ${permission} permission`)),
-		[EVENTS.COMMANDS.INVALID_ARGUMENT]: (command, message) => command.handleException(new CommandException(message))  
-	}
+	minArgs = 0;
+	active = true;
+	isAllowed = (message) => true
+	path = __dirname
 
 	checkBasicPermissions() {
-		if (this.ignoreBots && this.message.author.bot) return this.emit(EVENTS.COMMANDS.BOT_NOT_ALLOWED); 
-		if (!this.accept.contains(this.message.type)) return this.emit(EVENTS.COMMANDS.INVALID_TYPE);
-		return true;
+		if (this.ignoreBots && this.message.author.bot) this.emit(EVENTS.COMMANDS.BOT_NOT_ALLOWED); 
+		if (!this.accept.contains(this.message.type)) this.emit(EVENTS.COMMANDS.INVALID_TYPE);
 	}
 
 	checkGuildPermissions() {
-		if (this.isDm() || (this.ownerBypass && this.bot.owners.has(this.message.author.id))) return true;
+		if (this.isDm() || (this.devBypass && config.devs.hasOwnProperty(this.message.author.id)) && config.devs.bypassDisabled !== true) return;
 		let missingPerm = this.userPermissions.find(p => !this.message.member.hasPermission(p))
-		if (missingPerm) return this.emit(EVENTS.COMMANDS.MISSING_PERMISSION, missingPerm);
-		return true;
+		if (missingPerm) this.emit(EVENTS.COMMANDS.MISSING_PERMISSION, missingPerm);
 	}
 
 	emit(event, ...args) {
-		if (this.eventHandlers[event]) this.eventHandlers[event](this, ...args);
+		if (eventHandlers[event]) eventHandlers[event](this, ...args);
 	}
 
 	checkPermissions() {
-		return this.checkBasicPermissions() && this.checkGuildPermissions();
+		this.checkBasicPermissions();
+		this.checkGuildPermissions();
 	}
 
 	parse(str) {
@@ -97,35 +56,27 @@ class Command {
 			let re = arg.regex;
 			re.lastIndex = j;
 			let match = str.match(re);
-			if (!match || !arg.isValid(match, str)) {
+			if (!match || !arg.isValid(match, this.message)) {
 				re.lastIndex = j;
-				match = this.skipSpaces(re, str)
+				match = skipSpaces(re, str)
 			}
-			if (!match) return this.emit(EVENTS.COMMANDS.INVALID_ARGUMENT, arg.errorMessage(str.substring(j)));
+			if (!match || !arg.isValid(match, this.message)) this.emit(EVENTS.COMMANDS.INVALID_ARGUMENT, arg.errorMessage(str.substring(j)));
 			args.push(match.length > 1 ? match.slice(1) : match[0]);
 			j = re.lastIndex;
 		}
 
+		if (this.minArgs > args.length) this.emit(EVENTS.COMMANDS.MISSING_ARGUMENTS)
+
 		return args;
 	}
 
-	skipSpaces(re, str) {
-		let r = / +/y;
-		r.lastIndex = re.lastIndex;
-		let m = str.match(r);
-		console.log(re.lastIndex, r.lastIndex, str)
-		re.lastIndex = m ? r.lastIndex : re.lastIndex;
-		console.log(re.lastIndex, r.lastIndex, str)
-		return str.match(re);
+	reload() {
+		delete require.cache[require.resolve(this.path)];
+		return require(require.resolve(this.path));
 	}
 
 	run() {
 		throw new CommandException("Command not implemented");
-	}
-
-	handleException(e) {
-		this.message && this.message.reply(e.message);
-		!this.message && console.log(e);
 	}
 
 	handleUnhandledError(e) {
@@ -135,9 +86,8 @@ class Command {
 	isDm() {
 		return this.message.type == "dm";
 	}
-
 }
 
-let c = new Command();
-c.args = [WordArgument, WordArgument]
-console.log(c.parse('a  little fox'))
+Command.eventHandlers = eventHandlers;
+
+module.exports = {command: Command, CommandException}
