@@ -1,8 +1,9 @@
-const WordTree = require('./wordTree');
 const EVENTS = require('./events');
 const {CommandException} = require('./command');
 let config = require('./config');
-let logger = require('./logger');
+let logger = require('../utils/logger');
+const CommandGroup = require('./commandGroup');
+const emitter = new require('events')();
 
 class CommandHandlerException extends Error {}
 
@@ -13,21 +14,24 @@ const eventHandlers = {
 			if (dev.sendErrors) message.client.users.fetch(id).then(u => u.send(e.message)).catch(logger.log)
 		})
 	}
-	
 }
 
-class CommandHandler {
-	tree = new WordTree()
+class CommandHandler extends CommandGroup {
 
-	constructor(trigger = '!') {
-		this.trigger = trigger;
-	}
-
-	runCommand(command, message) {
+	runCommand(command, commandContent, message) {
 		if (!command.isAllowed(message)) return;
 
 		try {
-			command.checkPermissions();
+			let errors = command.checkPermissions(message);
+			
+			if (errors.length == 0) {
+				let {args, errors} = command.parse(commandContent, message);
+				if (errors.length == 0) return command.run(args, message);
+			}
+			
+			errors.forEach(e => emitter.emit.apply(emitter, e));
+			let errorMessage = errors.map(e => command.handleError.apply(e)).filter(str => str.trim()).join('\n');
+			if (errorMessage) throw new CommandException(errorMessage);
 		} catch(e) {
 			if (e instanceof CommandException) {
 				this.emit(EVENTS.COMMAND_HANDLER.COMMAND_EXCEPTION, e, message);
@@ -47,33 +51,12 @@ class CommandHandler {
 		this.addCommand(newCommand);
 	}
 
-	addCommand(command) {
-		command.triggers.forEach(t => this.addCommandTrigger(t, command));
-	}
-
-	addCommandTrigger(trigger, command) {
-		let val = this.tree.get(trigger) 
-		if (val !== null) {
-			if (val !== command) throw new CommandHandlerException(`Can't add trigger ${trigger} to commands, already defined`); 
-			else return;
-		}
-		this.tree.add(trigger, command);
-	}
-
-	removeCommand(command) {
-		command.triggers.forEach(t => this.tree.remove(t));
-	}
-
 	processMessage(message) {
-		if (message.content.startsWith(this.trigger)) {
-			let path = this.tree._nodePath(message.content.substring(this.trigger.length).matchAll(/[^ ]+/g))
-			for (let i = path.length - 1; i >= 0; i--) {
-				if (path[i]._val) return this.runCommand(path[i]._val, message);
+		let message = message.content;
+		for (let i = 1; i < message.length; i++) {
+			if (message[i] != ' ' && (message[i - 1] == ' ') || i + 1 == message.length) {
+				this.run(message.substring(0, i));
 			}
 		}
 	}
 }
-
-let cmd = new CommandHandler();
-cmd.addCommandTrigger('get image', 3);
-cmd.processMessage({content: '!get image 66'})
