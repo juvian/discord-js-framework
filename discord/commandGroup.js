@@ -1,43 +1,38 @@
 const { CommandException, Command } = require("./command");
 
-class CommandGroup extends Command {
-    children = {}
-    groups = [];
-    
+class CommandGroup {
+    children = new Set();
+    triggers = new Set();
 
     add(cmd) {
-        if (cmd instanceof CommandGroup) this.addCommandGroup(cmd);
-        else if (cmd instanceof Command) this.addCommand(cmd);
-        else throw CommandException("Only commands and command groups can be added");
-    }
-
-    addCommandGroup(group) {
-        if (group.triggers.size == 0) groups.push(group);
-        this.registerTriggers(group);
-    }
-
-    addCommand(cmd) {
-        if (cmd.triggers.size == 0) throw new CommandException("Command has no triggers");
-        this.registerTriggers(cmd);
-    }
-
-    registerTriggers(cmd) {
-        for (let trigger of cmd.triggers) {
-            if (!this.children.hasOwnProperty(trigger)) this.children = new Set();
-            if (this.children[trigger].has(cmd)) throw new CommandException("Command already registered");
-            this.children[trigger].add(cmd);
-        }
+        if (this.children.has(cmd)) throw new CommandException("Command already in group");
+        this.children.add(cmd);
     }
 
     remove(cmd) {
-        for (let trigger of cmd.triggers) {
-            if (!this.children.hasOwnProperty(trigger) || !this.children[trigger].has(cmd)) throw new CommandException("Command is not a part of this group");
-            this.children[trigger].delete(cmd);
-            if (this.children[trigger].size == 0) delete this.children[trigger];
+        if (!this.children.has(cmd)) throw new CommandException("Command not in group");
+        this.children.delete(cmd);
+    }
+
+    _handle(currentText, message, context) {
+        for (let child of this.children) {
+            if (child.handle(currentText, message, context)) return true;
         }
     }
 
-    run(message,)
+    handle(currentText, message, context) {
+        if (this.triggers && this.triggers.size) {
+            for (let [qty, str] of currentText) {
+                if (this.triggers.has(str)) {
+                    currentText.forward(qty);
+                    if (this._handle(currentText, message, context)) return true;
+                    currentText.backward(qty);
+                }
+            }
+        } else {
+            return this._handle(currentText, message, context);
+        }
+    }
 
 }
 

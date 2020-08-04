@@ -15,11 +15,8 @@ class Command {
 
 	clientPermissions = ["SEND_MESSAGES"];
 	userPermissions = [];
-	accept = ["guild"];
-	ignoreBots = true;
 	triggers = new Set();
 	minArgs = 0;
-	isAllowed = (message) => true;
 	path = __dirname;
 
 	constructor(arguments, opts) {
@@ -27,31 +24,27 @@ class Command {
 		this.args = Object.entries(arguments || {}).sort((a, b) => a[1].order - b[1].order);
 	}
 
-	checkBasicPermissions(message) {
-		let errors = [];
-		if (this.ignoreBots && message.author.bot) errors.push([EVENTS.COMMANDS.BOT_NOT_ALLOWED]); 
-		if (!this.accept.contains(message.type)) errors.push([EVENTS.COMMANDS.INVALID_TYPE]);
-		return errors;
+	shouldRun(message) {
+		return true;
 	}
 
-	getError(event, ...args) {
-		if (event == EVENTS.COMMANDS.INVALID_TYPE) return `This command is not allowed on ${this.message.type}`;
-		else if (event == EVENTS.COMMANDS.INVALID_ARGUMENT) return args[0];
-		else if (event == EVENTS.COMMANDS.MISSING_ARGUMENTS) return `This command requires at least ${this.minArgs} arguments`;
-		return '';
-	}
-
-	checkGuildPermissions(message) {
-		let errors = [];
-		if (message.type != "dm") {
-			let missingPerm = this.userPermissions.find(p => !message.member.hasPermission(p));
-			if (missingPerm) errors.push([EVENTS.COMMANDS.MISSING_PERMISSION, missingPerm]);
-		}
-		return errors;
+	missingUserPermissionError(permission) {
+		throw new CommandException('Missing user permission: ' + permission, EVENTS.COMMANDS.MISSING_PERMISSION);
 	}
 
 	checkPermissions(message) {
-		return this.checkBasicPermissions(message).concat(this.checkGuildPermissions(message));
+		if (message.type != "dm") {
+			let missingPerm = this.userPermissions.find(p => !message.member.hasPermission(p));
+			if (missingPerm) this.missingUserPermissionError(missingPerm));
+		}
+	}
+
+	missingArguments() {
+		throw new CommandException(`This command requires at least ${this.minArgs} arguments`, EVENTS.COMMANDS.MISSING_ARGUMENTS);
+	}
+
+	invalidArgument(name, arg, str) {
+		throw new CommandException(`Error on ${name} argument, ` + arg.errorMessage(str.substring(j, re.lastIndex)), EVENTS.COMMANDS.INVALID_ARGUMENT);
 	}
 
 	parse(str, message) {
@@ -66,16 +59,15 @@ class Command {
 			let match = arg.parse(str);
 
 			if (!match || !arg.isValid(match, message)) {
-				errors.push([EVENTS.COMMANDS.INVALID_ARGUMENT, `Error on ${name} argument, ` + arg.errorMessage(str.substring(j, re.lastIndex))]);
-				break;
+				this.invalidArgument(name, arg, str.substring(j, re.lastIndex));
 			}
 			args[name] = match.length > 1 ? match.slice(1) : match[0];
 			j = re.lastIndex;
 		}
 
-		if (this.minArgs > Object.keys(args).length) errors.push([EVENTS.COMMANDS.MISSING_ARGUMENTS])
+		if (this.minArgs > Object.keys(args).length) this.missingArguments();
 
-		return {args, errors};
+		return args;
 	}
 
 	reload() {
@@ -89,6 +81,16 @@ class Command {
 
 	handleUnhandledError(e) {
 		this.logger && this.logger.logUnhandledError(e);
+	}
+
+	handle(currentText, message, context) {
+		for (let [qty, str] of currentText) {
+			if (this.triggers.has(str)) {
+				currentText.forward(qty);
+				
+				currentText.backward(qty);
+			}
+		}
 	}
 }
 

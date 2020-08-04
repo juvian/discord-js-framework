@@ -17,6 +17,7 @@ const eventHandlers = {
 }
 
 class CommandHandler extends CommandGroup {
+	accept = ["guild"];
 
 	runCommand(command, commandContent, message) {
 		if (!command.isAllowed(message)) return;
@@ -51,12 +52,16 @@ class CommandHandler extends CommandGroup {
 		this.addCommand(newCommand);
 	}
 
+	triggerFor(message) {
+		return '!';
+	}
+
 	processMessage(message) {
-		let message = message.content;
-		for (let i = 1; i < message.length; i++) {
-			if (message[i] != ' ' && (message[i - 1] == ' ') || i + 1 == message.length) {
-				this.run(message.substring(0, i));
-			}
+		let content = message.content;
+		let trigger = this.triggerFor(message);
+
+		if (!message.author.bot && this.accept.contains(message.type) && content.startsWith(trigger)) {
+			this.handle(new WordIterator(message.content.substring(trigger.length)), message, {});
 		}
 	}
 }
