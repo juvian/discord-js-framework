@@ -6,35 +6,32 @@ class Handler {
     }
     
     add(...handlers) {
-        this.handlers.push(handlers);
+        if(handlers.length) this.handlers.push(handlers);
+        return this;
     }
 
 
-    async runHandlers(handler, context, idx = 0) {
-        if (idx >= handler.length) {
-            context.done = true; return;
-        }
+    async _runHandlers(handlers, context, idx = 0) {
+        if (idx >= handlers.length) return context;
 
-        if (handler[idx] instanceof Handler) {
-            let res = await handler[idx].run(context);
-            if (res && res.done) return res;
-            return this.runHandlers(handler, context, idx + 1);
-        }
+        let func = handlers[idx].run || handlers[idx];
 
-        let func = handler[idx].run || handler[idx];
-
-        func(context, () => this.runHandlers(handler, context, idx + 1));
+        return new Promise(async (res) => {
+            let r = await func.call(handlers[idx], context, (ctx) => res(this._runHandlers(handlers, ctx || context, idx + 1)));
+            res(r);
+        });
     }
 
+    async run(context, next) {
+        next = next || ((v) => v);
 
-    async run(context, idx = 0) {
-        if (idx >= this.handlers.length) return;
-        let copy = Object.assign({}, context);
-        
-        await this.runHandlers(this.handlers[idx], copy);
-        console.log(copy)
-        if (copy.done === true) return copy;
-        else return this.run(context, idx + 1);    
+        if (this.handlers.length == 0) return next(context);
+
+        for (let handler of this.handlers) {
+            let copy = Object.assign({}, context);
+            let res = await this._runHandlers(handler, copy);
+            if (res) return next(res);
+        } 
     }
 }
 
