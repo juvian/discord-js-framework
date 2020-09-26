@@ -1,5 +1,6 @@
-class Handler {
+class Path {
     handlers = [];
+    errorHandlers = [];
     
     constructor(...handlers) {
         this.add(...handlers);
@@ -10,15 +11,33 @@ class Handler {
         return this;
     }
 
+    onError(...handlers) {
+        this.errorHandlers = this.errorHandlers.concat(...handlers);
+        return this;
+    } 
+
+    handleError(e, context, idx = 0) {
+        if (idx >= this.errorHandlers.length) return e;
+
+        return new Promise(async (res) => {
+            await this.errorHandlers[idx].call(this.errorHandlers[idx], e, context, (e) => res(this.handleError(e, context, idx + 1)));
+            res();
+        })
+    }
 
     async _runHandlers(handlers, context, idx = 0) {
         if (idx >= handlers.length) return context;
 
         let func = handlers[idx].run || handlers[idx];
 
-        return new Promise(async (res) => {
-            let r = await func.call(handlers[idx], context, (ctx) => res(this._runHandlers(handlers, ctx || context, idx + 1)));
-            res(r);
+        return new Promise(async (res, rej) => {
+            try {
+                await func.call(handlers[idx], context, (ctx) => res(this._runHandlers(handlers, ctx || context, idx + 1)));
+            } catch(e) {
+                let error = await this.handleError(e, context);
+                if (error) rej(error);
+            }
+            res();
         });
     }
 
@@ -35,4 +54,4 @@ class Handler {
     }
 }
 
-module.exports = Handler;
+module.exports = Path;

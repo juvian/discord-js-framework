@@ -1,9 +1,11 @@
-const Handler = require('../discord/handler');
-const {assertEquals} = require('./tests');
+const Path = require('../discord/handler');
+const {assertEquals, test, noop} = require('./tests');
 
 let count = (context, next) => {context.count++; next()}; 
-let noop = () => {}
-let broken = (context, next) => {throw "asd"}
+let broken = (context, next) => {throw Error("asd")}
+let errorContinue = (e, context, next) => {context.cont = true;next(e)}
+let errorSkip = (e, context, next) => {context.skip = true;}
+let ret = (context, next) => context;
 
 class Add {
     constructor(add) {
@@ -18,18 +20,15 @@ class Add {
 
 async function assertHandler(handler, context, result) {
     let res = await handler.run(context);
-    console.log(res)
     assertEquals(JSON.stringify(res), JSON.stringify(result));
 }
 
-async function test() {
-    let handler = new Handler(count, count);
-    await assertHandler(handler, {count: 0}, {count: 2});
-}
-
 async function testNested() {
-    let h = new Handler();
-    let handler = new Handler(count, h, count);
+    let handler = new Path(count, count);
+    await assertHandler(handler, {count: 0}, {count: 2});
+
+    let h = new Path();
+    handler = new Path(count, h, count);
     await assertHandler(handler, {count: 0}, {count: 2});
     h.add(count, noop, count); // doesnt finish
     await assertHandler(handler, {count: 0}, undefined);
@@ -39,23 +38,23 @@ async function testNested() {
     handler.add(count);
     await assertHandler(handler, {count: 0}, {count: 1});
 
-    handler = new Handler(count, new Handler(count, new Handler(count), count), count, new Add(5));
+    handler = new Path(count, new Path(count, new Path(count), count), count, new Add(5));
     await assertHandler(handler, {count: 0}, {count: 10});
 
-    handler = new Handler(noop);
+    handler = new Path(noop);
     await assertHandler(handler, {count: 0}, undefined);
 
-    handler = new Handler(count, broken);
-    handler.add(count, count, count);
-    await assertHandler(handler, {count: 0}, {count: 3, done: true});
+    handler = new Path(ret);
+    await assertHandler(handler, {count: 0}, undefined);
 }
 
-(async function() {
-    for (let t of [test, testNested]) {
-        try {
-            await t();
-        } catch(e) {
-            console.log(e);
-        }
-    }
-}());
+async function testErrors() {
+    let handler = new Path(count, broken).onError(errorSkip);
+    handler.add(count, count, count);
+    await assertHandler(handler, {count: 0}, {count: 3});
+
+    handler = new Path(count, broken, count).onError(errorContinue, errorContinue, errorSkip);
+    await assertHandler(handler, {count: 0}, undefined);
+}
+
+test([testNested, testErrors])
