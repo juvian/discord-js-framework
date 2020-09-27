@@ -2,6 +2,9 @@ let counter = 0;
 
 let index = (idx) => (v) => v[idx];
 
+class UserNotFound extends Error {}
+class ChannelNotFound extends Error {}
+
 class ValidArgument {
 	static processors = [];
 
@@ -30,14 +33,6 @@ class ValidArgument {
 
 	get regex() {
 		return this.constructor.regex;
-	}
-
-	get postProcess() {
-		return this.constructor.postProcess || ((v) => v);
-	}
-
-	get preProcess() {
-		return this.constructor.preProcess || ((v) => v);
 	}
 }
 
@@ -69,23 +64,27 @@ class NumberArgument extends RegexArgument {
 }
 
 class ChannelArgument extends WordArgument {
-	isValid(val, message) {
-		return message.guild.channels.cache.has(val) || message.guild.channels.cache.find(c => c.name == val || (val.startsWith("<#") && val.endsWith(">") && c.name == val.substring(2, val.length - 1))) !== null;
-	}
 	static expected = 'a channel';
+
+	process(channelId, context) {
+		channelId = super.process(channelId);
+		if (channelId.startsWith("<#") && channelId.endsWith(">")) channelId = channelId.substring(2, channelId.length - 1);
+		let channel = context.message.guild.channels.cache.get(channelId) || context.message.guild.channels.cache.find(u => u.name == channelId);
+		if (!channel) throw new ChannelNotFound(`Channel ${channelId} not found`);
+		return channel;
+	}
 }
 
 class UserArgument extends WordArgument {
-	static regex = /\s*<@?(\d+)>?|([^\s]+)/
-	static processors = [index(1)]
 	static expected = 'a user';
 
 	process(userId, context) {
 		userId = super.process(userId);
+		if (userId.startsWith("<@") && userId.endsWith(">")) userId = userId.substring(2, userId.length - 1);
 		let user = context.message.guild.users.cache.get(userId) || context.message.guild.users.cache.find(u => u.name == userId);
-		if (!user) throw Error(`User ${userId} not found`);
+		if (!user) throw new UserNotFound(`User ${userId} not found`);
+		return user;
 	}
-
 }
 
-module.exports = {ValidArgument, WordArgument, NumberArgument, ChannelArgument, UserArgument, StringArgument};
+module.exports = {ValidArgument, WordArgument, NumberArgument, ChannelArgument, UserArgument, StringArgument, UserNotFound, ChannelNotFound};

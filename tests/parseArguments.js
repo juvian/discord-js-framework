@@ -1,33 +1,44 @@
 const {Parser} = require('../discord/handlers/parseArguments');
-const {StringArgument, NumberArgument, WordArgument, UserArgument} = require('../discord/arguments')
+const {StringArgument, NumberArgument, WordArgument, UserArgument, UserNotFound, ChannelNotFound, ChannelArgument} = require('../discord/arguments')
 const {assertEquals, noop} = require('./tests');
 
-class S extends Set {
-    find(callback) {
-        for (let num of this) {
-            if (callback(num)) return num;
-        }
+Set.prototype.find = function(callback) {
+    for (let num of this) {
+        if (callback({id: num, name: num+"name"})) return {id: num, name: num+"name"};
     }
+} 
 
-    get(v) {
-        return this[v];
-    }
+Set.prototype.get = function(v) {
+   return this.has(v) ? {id: v, name: v+"name"} : null;
 }
 
 function getContext(opts) {
     let context = {
+        _lastIndex: opts.lastIndex || 0,
         message: {
             content: opts.message,
-            lastIndex: opts.lastIndex || 0,
             guild: {
                 users: {
-                    cache: new S(['1234'])
+                    cache: new Set(['1234'])
+                },
+                channels: {
+                    cache: new Set(["channelId"])
                 }
             }
-        },
+        }
     }
     
     return context;
+}
+
+
+function assertError(context, error) {
+    try {
+        context = parser.run(getContext(context))
+        throw new Error("should give user not found")
+    } catch (e) {
+        if (!e instanceof error) throw e;
+    }    
 }
 
 let parser = new Parser({
@@ -43,7 +54,20 @@ parser = new Parser({
     'reason': new StringArgument() 
 });
 
-context = parser.run(getContext({message: "!ban <@1234> too much spam", lastIndex: "!ban".length}))
-assertEquals(context.args, {user: '1234', reason: 'too much spam'});
-context = parser.run(getContext({message: "!ban 1234 too much spam", lastIndex: "!ban".length}))
-assertEquals(context.args, {user: '1234', reason: 'too much spam'});
+for (let userId of ["<@1234>", "1234", "1234name"]) {
+    context = parser.run(getContext({message: "!ban " + userId + " too much spam", lastIndex: "!ban".length}))
+    assertEquals(context.args, {"user":{"id":"1234","name":"1234name"},"reason":"too much spam"});
+} 
+assertError({message: "!ban 123 too much spam", lastIndex: "!ban".length}, UserNotFound);
+
+parser = new Parser({
+    'channel': new ChannelArgument(),
+    'action': new WordArgument() 
+});
+
+for (let channelId of ["<#channelId>", "channelId", "channelIdname"]) {
+    context = parser.run(getContext({message: channelId + " delete"}))
+    assertEquals(context.args, {"channel":{"id":"channelId","name":"channelIdname"},"action":"delete"});
+} 
+
+assertError({message: "invalidChannel delete"}, ChannelNotFound);

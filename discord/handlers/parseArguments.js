@@ -15,7 +15,7 @@ class Parser {
 
     run(context, next) {
         let args = context.args = {};
-        let j = context.message.lastIndex || 0;
+        let j = context._lastIndex || 0;
         let str = context.message.content;
 		
 		for (let [name, arg] of this.args) {
@@ -23,15 +23,13 @@ class Parser {
 			while (j < str.length && str[j] == ' ') j++;
             re.lastIndex = j;
             let match = arg.parse(str, name);
-            console.log(name, arg, match)
             args[name] = arg.process(match, context);
-            console.log(arg.match[0].length)
 			j += arg.match[0].length;
 		}
 
 		if (this.minArgs > Object.keys(args).length) throw MissingArguments(this.minArgs, Object.keys(args).length);
 
-        context.message.lastIndex = j;
+        context._lastIndex = j;
 
         if (next) next();
         return context;
