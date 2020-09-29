@@ -15,21 +15,16 @@ class Parser {
 
     run(context, next) {
         let args = context.args = {};
-        let j = context._lastIndex || 0;
-        let str = context.message.content;
 		
 		for (let [name, arg] of this.args) {
-			let re = arg.regex;
-			while (j < str.length && str[j] == ' ') j++;
-            re.lastIndex = j;
-            let match = arg.parse(str, name);
+            let j = 0;
+            while (j < context.input.length && context.input[j] == ' ') j++;
+            context.input = context.input.substring(j);
+            let match = arg.parse(context, name);
             args[name] = arg.process(match, context);
-			j += arg.match[0].length;
 		}
 
 		if (this.minArgs > Object.keys(args).length) throw MissingArguments(this.minArgs, Object.keys(args).length);
-
-        context._lastIndex = j;
 
         if (next) next();
         return context;

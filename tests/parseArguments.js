@@ -1,6 +1,7 @@
 const {Parser} = require('../discord/handlers/parseArguments');
-const {StringArgument, NumberArgument, WordArgument, UserArgument, UserNotFound, ChannelNotFound, ChannelArgument} = require('../discord/arguments')
+const {StringArgument, NumberArgument, WordArgument, UserArgument, UserNotFound, ChannelNotFound, ChannelArgument, PicklistArgument} = require('../discord/arguments')
 const {assertEquals, noop} = require('./tests');
+const { User } = require('discord.js');
 
 Set.prototype.find = function(callback) {
     for (let num of this) {
@@ -14,9 +15,8 @@ Set.prototype.get = function(v) {
 
 function getContext(opts) {
     let context = {
-        _lastIndex: opts.lastIndex || 0,
+        input: opts.message,
         message: {
-            content: opts.message,
             guild: {
                 users: {
                     cache: new Set(['1234'])
@@ -55,10 +55,10 @@ parser = new Parser({
 });
 
 for (let userId of ["<@1234>", "1234", "1234name"]) {
-    context = parser.run(getContext({message: "!ban " + userId + " too much spam", lastIndex: "!ban".length}))
+    context = parser.run(getContext({message: userId + " too much spam"}))
     assertEquals(context.args, {"user":{"id":"1234","name":"1234name"},"reason":"too much spam"});
 } 
-assertError({message: "!ban 123 too much spam", lastIndex: "!ban".length}, UserNotFound);
+assertError({message: " 123 too much spam", lastIndex: "!ban".length}, UserNotFound);
 
 parser = new Parser({
     'channel': new ChannelArgument(),
@@ -71,3 +71,16 @@ for (let channelId of ["<#channelId>", "channelId", "channelIdname"]) {
 } 
 
 assertError({message: "invalidChannel delete"}, ChannelNotFound);
+
+parser = new Parser({
+    'prefix': new PicklistArgument(['!', "$"]),
+    'command': new PicklistArgument([{options: ['ban user', "bu"], value: 'ban'}, {options: ["delete user", "du"], value: "del"}]),
+    'user': new UserArgument()
+})
+
+for (let message of [{t: "!ban user 1234", v: "ban"}, {t: "$bu <@1234>", v: "ban"}, {t: "!delete USER 1234", v: "del"}, {t: "!du 1234name", v: "del"}]) {
+    context = parser.run(getContext({message: message.t}))
+    assertEquals(context.args.prefix, {"value": message.t[0], "match": message.t[0]});
+    assertEquals(context.args.command.value, message.v);
+    assertEquals(context.args.user, {"id":"1234","name":"1234name"});
+}

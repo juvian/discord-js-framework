@@ -5,7 +5,7 @@ let index = (idx) => (v) => v[idx];
 class UserNotFound extends Error {}
 class ChannelNotFound extends Error {}
 
-class ValidArgument {
+class Argument {
 	static processors = [];
 
 	constructor() {
@@ -23,42 +23,46 @@ class ValidArgument {
 		return val;
 	}
 
-	parse(message, name) {
-		return message;
+	parse(context) {
+		return context.input;
 	}
 
-	errorMessage(str, name) {
-		return `Invalid ${name} argument, expected ${this.constructor.expected} but got ${str}`;
+	errorMessage(context, name) {
+		return `Invalid ${name} argument, expected ${this.expected} but got ${context.input}`;
 	}
 
 	get regex() {
 		return this.constructor.regex;
 	}
+
+	get expected() {
+		return this.constructor.expected;
+	}
 }
 
-class RegexArgument extends ValidArgument {
+class RegexArgument extends Argument {
 	static processors = [index(0)]
-	parse(message, name) {
-		let m = message.match(this.regex);
-		this.match = m;
-		if (!m) throw new Error(this.errorMessage(message, name));
+	parse(context, name) {
+		let m = context.input.match(this.regex);
+		if (!m) throw new Error(this.errorMessage(context, name));
+		context.input = context.input.substring(m[0].length);
 		return m;
 	}
 }
 
 
 class StringArgument extends RegexArgument {
-	static regex = /.+/y
+	static regex = /^.+/
 	static expected = 'a string'
 }
 
 class WordArgument extends RegexArgument {
-	static regex = /[^\s]+/y
+	static regex = /^[^\s]+/
 	static expected = 'a word';
 }
 
 class NumberArgument extends RegexArgument {
-	static regex = /\d+/y
+	static regex = /^\d+/
 	static expected = 'a number';
 	static processors = [index(0), Number];
 }
@@ -87,4 +91,31 @@ class UserArgument extends WordArgument {
 	}
 }
 
-module.exports = {ValidArgument, WordArgument, NumberArgument, ChannelArgument, UserArgument, StringArgument, UserNotFound, ChannelNotFound};
+class PicklistArgument extends Argument {
+	constructor(values) {
+		super();
+		this.values = values.map(v => {
+			v = typeof v === "object" ? v : {options: v, value: v};
+			v.options = Array.isArray(v.options) ? v.options : [v.options];
+			return v;
+		});
+	}
+
+	parse(context, name) {
+		let match; 
+		for (let value of this.values) {
+			match = value.options.find(o => context.input.toLowerCase().startsWith(o));
+			if (match) {
+				context.input = context.input.substring(match.length);
+				return {value: value.value, match}
+			}
+		}
+		throw new Error(this.errorMessage(context, name));
+	}
+
+	get expected() {
+		return 'a value from [' + this.values.join(v => v.options.join(', ')) + ']';
+	}
+}
+
+module.exports = {Argument, WordArgument, NumberArgument, ChannelArgument, UserArgument, StringArgument, UserNotFound, ChannelNotFound, PicklistArgument};
